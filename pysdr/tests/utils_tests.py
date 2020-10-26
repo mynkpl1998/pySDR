@@ -1,4 +1,5 @@
 from pysdr.utils import *
+from ctypes import c_ubyte, POINTER, byref
 
 def test_print_error_msg():
     """
@@ -47,3 +48,20 @@ def test_print_warn_msg():
     """
     message = "This is a test warning message. This should be printed in yellow."
     print_warn_msg(message)
+
+def test_c_ubyte_ptr_to_string():
+    """
+    Verifies the c_ubyte_ptr_to_string.
+    The function should return the string
+    by reading byte at a time till the 
+    specified size.
+    """
+    sample_string = (c_ubyte * 6)()
+    sample_string[0] = 65
+    sample_string[1] = 66
+    sample_string[2] = 67
+    sample_string[3] = 68
+    sample_string[4] = 69
+    sample_string[5] = 70
+
+    assert c_ubyte_ptr_to_string(sample_string, 6) == "ABCDEF"

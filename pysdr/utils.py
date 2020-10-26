@@ -51,3 +51,20 @@ def print_warn_msg(msg):
         msg: The message to print on the console.
     """
     print(Style.BRIGHT + Fore.YELLOW + "[~]: ", msg, Style.RESET_ALL)
+
+def c_ubyte_ptr_to_string(c_ubyte_pointer, size):
+    """
+    Returns the string pointed by the c_ubyte
+    pointer.
+    
+    Parameters
+    ----------
+    * c_ubyte_pointer                 : Pointer to starting of the buffer.
+    * size                            : Size of the buffer to read.
+    """
+    buffer_str = ''
+    for idx in range(0, size):
+        if chr(c_ubyte_pointer[idx]) == '\x00':
+            break
+        buffer_str += chr(c_ubyte_pointer[idx])
+    return buffer_str
