@@ -1,5 +1,5 @@
-pyComm
-======
+pySDR
+=====
 
 An open source python library designed for RTL-SDR.
 
