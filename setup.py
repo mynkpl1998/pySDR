@@ -13,7 +13,7 @@ VERSION = '0.1.0'
 #This is a list of files to install, and where
 #(relative to the 'root' dir, where setup.py is)
 #You could be more specific.
-#files = ["tests/*"]
+files = ["tests/*"]
 
 setup(
     name=DISTNAME,
@@ -27,7 +27,7 @@ setup(
     #(If you have other packages (dirs) or modules (py files) then
     #put them into the package directory - they will be found
     #recursively.)
-    packages=['pysdr'],
+    packages=['pysdr', 'pysdr.tests'],
     install_requires=[
           'numpy',
           'scipy',
