@@ -54,8 +54,9 @@ def print_warn_msg(msg):
 
 def c_ubyte_ptr_to_string(c_ubyte_pointer, size):
     """
-    Returns the string pointed by the c_ubyte
-    pointer.
+    Returns the string pointed by the c_ubyte_pointer
+    buffer of given size or until null character
+    is encountered.
     
     Parameters
     ----------
