@@ -29,10 +29,10 @@ pip install -r requirements.txt
 python setup.py install
 ```
 
-Test
+Tests
 ----
 
-We utilize pytest to run tests. To run tests, navigate to the root of the directory and run the following command.
+To run tests, navigate to the root of the directory and run the following command.
 
 ```
 conda activate pysdr
