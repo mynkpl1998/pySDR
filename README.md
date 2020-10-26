@@ -6,7 +6,7 @@ An open source python library designed for RTL-SDR.
 Objectives
 ----------
 
-* This library is developed to provide easy access to RTL SDR by wraping the C based **librtlsdr** api for python using ctyppes. 
+* This library is developed to provide easy access to RTL-SDR by wrapping the C based **librtlsdr** driver for python using ctypes. 
 
 ---
 **NOTE**
