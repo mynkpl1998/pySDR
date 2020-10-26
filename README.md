@@ -17,7 +17,7 @@ This library is designed to work with RTL SDR which uses **Realtek RTL2832U** an
 
 Installation
 ------------
-We recommend you to create a virtual or conda environment. You get the minimal version of conda(Miniconda) form [here](https://docs.conda.io/en/latest/miniconda.html).
+We recommend you to create a virtual or conda environment. Download the minimal version of conda(Miniconda) form [here](https://docs.conda.io/en/latest/miniconda.html).
 
 ```bash
 # Create a conda environment named pySDR.
