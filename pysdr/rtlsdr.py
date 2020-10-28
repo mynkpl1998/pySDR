@@ -19,7 +19,7 @@ class librtlsdr:
 
     Raises
     ------
-        * ValueError:
+    * ValueError:
                                 * If the librtlsdr is not found on the system.
     
     Attributes
