@@ -24,7 +24,7 @@ class librtlsdr:
     
     Attributes
     ----------
-    * clib                          : Returns the CDLL library object of the librtlsdr.
+    * clib                      : Returns the CDLL library object of the librtlsdr.
     """
 
     def __init__(self, ):
