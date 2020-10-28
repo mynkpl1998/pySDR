@@ -82,3 +82,12 @@ def test_c_ubyte_ptr_to_string_null_based():
     sample_string[5] = 70
 
     assert c_ubyte_ptr_to_string(sample_string, 6) == "AB"
+
+def test_cstr():
+    """
+    Verifies the cstr function.
+    The function should return the cstring.
+    """
+    sample_string = "abcdef"
+    csample_string = cstr(sample_string)
+    assert sample_string == csample_string

@@ -1,5 +1,6 @@
 from colorama import init
 from colorama import Fore, Style
+from ctypes import c_ubyte, c_void_p
 
 # Intializes the colorama library.
 init()
@@ -69,3 +70,31 @@ def c_ubyte_ptr_to_string(c_ubyte_pointer, size):
             break
         buffer_str += chr(c_ubyte_pointer[idx])
     return buffer_str
+
+def cstr(string):
+    """
+    Converts and returns the cstr equivalent
+    of the python string.
+
+    Parameters
+    ----------
+    * string                        : (string) Python string.
+
+    Returns
+    -------
+    * cstr                          : (c_ubyte array) Equivalent c-string.
+
+    Raises
+    ------
+    * ValueError                    
+                                    * If type of string is not Python String.
+    """
+
+    if type(string) != str:
+        print_error_msg("Expected string to be a Python string. Got: %s"%(type(string)))
+        raise ValueError
+    
+    array_type = c_void_p * (len(string)+1)
+    cstr = array_type()
+    cstr = string
+    return cstr
