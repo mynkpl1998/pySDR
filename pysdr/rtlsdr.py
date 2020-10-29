@@ -1,830 +1,259 @@
-import numpy as np
-from ctypes import CDLL, c_int32, c_ubyte, POINTER, c_uint32, c_int, c_void_p, c_uint, c_void_p, byref
-from ctypes.util import find_library
-from pysdr.utils import print_error_msg, c_ubyte_ptr_to_string, cstr, print_warn_msg, print_info_msg
+from ctypes import c_void_p
+from pysdr.rtlsdr_apis import librtlsdr
+from pysdr.utils import print_error_msg, print_info_msg, print_success_msg, print_warn_msg
 
-"""
-Re-defines the c_void_p as the
-device handle.
-"""
-p_rtlsdr_dev = c_void_p
-
-class librtlsdr:
-
+class Radio:
     """
-    Responsible for loading the rtlsdr shared library. 
-    The librtlsdr must be installed on the system.
-    The installation can be done by following the 
-    instructions from https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr.
+    Creates an object to interact with the RTL-SDR
+    device for the specified device index.
+    The number of RTL-SDR devices connected to the
+    host can be returned by querying py_rtlsdr_get_device_count 
+    api.
 
+    Parameters
+    ----------
+    * device_index                          : (int) RTL-SDR device index.
+    * logging_level                         : (int) 1 - Enable all (success, info and warning messages.)
+                                                    2 - Enable warning and info messages only, 
+                                                    3 - Enable warnings only.
+                                                    4 - Disable all messages.
+                                                    Default: 3.
     Raises
     ------
-    * ValueError:
-                                * If the librtlsdr is not found on the system.
-    
+    * TypeError
+                                            * If device index specified is invalid.
+
     Attributes
     ----------
-    * clib                      : Returns the CDLL library object of the librtlsdr.
+    * clib                                  * (librtlsdr) Returns the device librtlsdr object.
+    * center_freq                           * (int) Center freq of the device in Hz.
+    * sample_rate                           * (int) Sample Rate of the device in Hz.
+    * freq_correction                       * (int) Frequency correction in ppm.
+    * enable_agc                            * (bool) Whether AGC is enabled.
+    * tuner_gain                            * (float) Current tuner gain in dB.
+    * tuner_gains                           * (list) List of supported gain values for tuner in dB.
+    * enable_auto_tuner_gain                * (bool) Gain selection mode of the tuner. Auto - True, manual - False.
+    * tuner_xo_freq                         * (int) Tuner crystal frequency in Hz.
+    * rtl_xo_freq                           * (int) RTL2832 crystal frequency in Hz.
+
     """
 
-    def __init__(self, ):
+    def __init__(self, device_index, logging_level=3):
+        self.__librtlsdr = librtlsdr()
+
+        if int(device_index) != device_index:
+            print_error_msg("Expected device index to be of int. Got: %s."%(type(device_index)))
+            raise TypeError
         
-        # Load librtlsdr library
-        crtlsdr_shared_lib = 'rtlsdr.so'
-        if find_library(crtlsdr_shared_lib) is None:
-            print_error_msg("Unable to find librtlsdr.so. Make sure to install it from https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr.")
+        device_index = int(device_index)
+
+        self.__device_index = device_index
+
+        if int(logging_level) != logging_level:
+            print_error_msg("Expected logging level to be int. Got: %s"%(type(logging_level)))
+            raise TypeError
+
+        logging_level = int(logging_level)
+
+        if logging_level < 1 or logging_level > 4:
+            print_error_msg("Invalid logging level %d."%(logging_level))
             raise ValueError
+        
+        # Setting the logging level.
+        self.__logging_level = logging_level
 
-        self.__clib = CDLL("lib" + crtlsdr_shared_lib)
+        # Open a device pointer to the SDR.
+        self.__dev_ptr = c_void_p(None)
+        self.__dev_ptr = self.clib.py_rtlsdr_open(device_index)
+        
+        if self.__logging_level == 1:
+            print_success_msg("Successfully opened a libusb connection to the device.")
 
-        # API's init status
-        self.__apis_init_stat = {}
-        for api_name in dir(librtlsdr):
-            if "py_rtlsdr" in api_name:
-                self.__apis_init_stat[api_name] = False
+        # Get SDR details
+        self.__mid, self.__vid, self.__serial = self.clib.py_rtlsdr_get_device_usb_strings(self.__device_index)
+        if self.__logging_level < 3:
+            device_strings = "Manufacturer: %s, Vendor ID: %s, Serial %s."%(self.__mid, self.__vid, self.__serial)
+            print_info_msg(device_strings)
+        
+        # Attributes
+        self.__center_freq = None
+        self.__sample_rate = None
+        self.__enable_agc = None
+        self.__tuner_gain = None
+        self.__enable_auto_tuner_gain = None
+        self.__tuner_gains = self.clib.py_rtlsdr_get_tuner_gains(self.__dev_ptr)
+        self.__freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
+        self.__rtl_xo_freq, self.__tuner_xo_freq = self.clib.py_rtlsdr_get_xtal_freq(self.__dev_ptr)
+
+        # Init defaults
+        self.__init_default()
+
+        if self.__logging_level < 3:
+            device_config = 'Intialized device with following default values.'
+            device_config += '\n\t1. Center Freq: %d Hz.'%(self.__center_freq)
+            device_config += '\n\t2. Sample Rate: %d MSPS.'%(self.__sample_rate)
+            device_config += '\n\t3. AGC Enabled: %s.'%(self.__enable_agc)
+            device_config += '\n\t4. Automatic tuner gain selection: %s.'%(self.__enable_auto_tuner_gain)
+            device_config += '\n\t5. Freq Correction: %d ppm'%(self.__freq_correction)
+            device_config += '\n\t6. Tuner gain: %s dB'%(self.__tuner_gain)
+            print_info_msg(device_config)
+    
+    @property
+    def tuner_gain(self):
+        self.__tuner_gain = self.clib.py_rtlsdr_get_tuner_gain(self.__dev_ptr)
+        return self.__tuner_gain
+    
+    @property
+    def freq_correction(self):
+        self.__freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
+        return self.__freq_correction
+    
+    @property
+    def enable_auto_tuner_gain(self):
+        return self.__enable_auto_tuner_gain
     
     @property
     def clib(self):
-        return self.__clib
+        return self.__librtlsdr
     
-    def py_rtlsdr_get_device_count(self,):
-        """
-        Returns the number of RTL-SDR devices
-        connected to the host.
-        """
-        if not self.__apis_init_stat['py_rtlsdr_get_device_count']:
-            f = self.clib.rtlsdr_get_device_count
-            f.restype, f.argstypes = c_uint32, []
-            self.__apis_init_stat['py_rtlsdr_get_device_count'] = True
-        return self.clib.rtlsdr_get_device_count()
+    @property
+    def tuner_gains(self):
+        return self.__tuner_gains
     
-    def py_rtlsdr_get_device_name(self, device_index=0):
-        """
-        Returns the name of the connected device at
-        given index.
-
-        Parameters
-        ----------
-        * device_index              : (int) Device index.
-
-        Raises
-        ------
-        * ValueError
-                                    * If device index is greater than 
-                                    the number of connected devices.
-                                    * If device index is negative.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_get_device_name']:
-            f = self.clib.rtlsdr_get_device_name
-            f.restype, f.argstypes = POINTER(c_ubyte), [c_uint32]
-            self.__apis_init_stat['py_rtlsdr_get_device_name'] = True
-        
-        self.__check_for_rtlsdr_devices()
-        
-        if int(device_index) != device_index:
-            print_error_msg("Expected device index to be int. Got: %d"%(type(device_index)))
-            raise ValueError
+    @property
+    def center_freq(self):
+        self.__center_freq = self.clib.py_rtlsdr_get_center_freq(self.__dev_ptr)
+        return self.__center_freq
     
-        device_index = int(device_index)
-
-        if device_index < 0:
-            print_error_msg("Device index must be non-negative.")
-            raise ValueError
-        
-        if device_index >= self.py_rtlsdr_get_device_count():
-            print_error_msg("Expected device index < %d. Got device index: %d."%(self.py_rtlsdr_get_device_count(), device_index))
-            raise ValueError
-
-        device_name = self.clib.rtlsdr_get_device_name(c_uint32(device_index))
-        return c_ubyte_ptr_to_string(device_name, 126)
+    @property
+    def sample_rate(self):
+        self.__sample_rate = self.clib.py_rtlsdr_get_sample_rate(self.__dev_ptr)
+        return self.__sample_rate
     
-    def __check_for_rtlsdr_devices(self):
-        """
-        Checks whether any RTL-SDR device
-        is attached to the host.
-
-        Raises
-        ------
-        * ValueError                    : No device is found.
-        """
-        if self.py_rtlsdr_get_device_count() == 0:
-            print_error_msg("No RTL-SDR device is attached to the host.")
-            raise ValueError
-      
-    def py_rtlsdr_get_device_usb_strings(self, device_index=0):
-        """
-        Returns the USB device strings.
-
-        Parameters
-        ----------
-        * device_index                  : (int) Device index.
-
-        Returns
-        -------
-        * mid                           : (str) Device manufacturer.
-        * pid                           : (str) Device product ID.
-        * serial                        : (str) Device serial ID.
-
-        Raises
-        ------
-        * TypeError
-                                        * If device index is negative.
-                                        * If device index is greater than or
-                                        equal to the number of connected 
-                                        supported devices.
-        """
-        if not self.__apis_init_stat['py_rtlsdr_get_device_usb_strings']:
-            f = self.clib.rtlsdr_get_device_usb_strings
-            f.restype, f.argstypes = c_int, [c_uint32, POINTER(c_ubyte), POINTER(c_ubyte), POINTER(c_ubyte)]
-            self.__apis_init_stat['py_rtlsdr_get_device_usb_strings'] = True
-        
-        self.__check_for_rtlsdr_devices()
-
-        if int(device_index) != device_index:
-            print_error_msg("Expected device index to be int. Got: %d"%(type(device_index)))
-            raise ValueError
+    @property
+    def enable_agc(self):
+        return self.__enable_agc
     
-        device_index = int(device_index)
-
-        if device_index < 0:
-            print_error_msg("Device index must be non-negative.")
-            raise ValueError
-        
-        if device_index >= self.py_rtlsdr_get_device_count():
-            print_error_msg("Expected device index < %d. Got device index: %d."%(self.py_rtlsdr_get_device_count(), device_index))
-            raise ValueError
-
-        mid = (c_ubyte * 256)()
-        pid = (c_ubyte * 256)()
-        serial = (c_ubyte * 256)()
-        result = self.clib.rtlsdr_get_device_usb_strings(c_uint32(device_index),
-                                                          mid,
-                                                          pid,
-                                                          serial)
-        if(result != 0):
-            print_error_msg("Failed tp fetch USB device strings for device indexed as %d."%(device_index))
-            raise ValueError
-        return c_ubyte_ptr_to_string(mid, 256), c_ubyte_ptr_to_string(pid, 256), c_ubyte_ptr_to_string(serial, 256)
+    @property
+    def tuner_xo_freq(self):
+        _, self.__tuner_xo_freq = self.clib.py_rtlsdr_get_xtal_freq(self.__dev_ptr)
+        return self.__tuner_xo_freq
     
-    def py_rtlsdr_get_index_by_serial(self, serial_id):
-        """
-        Returns the device index with whose serial number
-        is given by serial_id.
-
-        Parameters
-        ----------
-        * serial_id                     : (str) The serial id of the RTL-SDR device.
-
-        Returns
-        -------
-        * device_index                  : (int) Returns the device index of the RTL-SDR 
-                                            device with serial_id.
-        
-        Raises
-        ------
-        * ValueError:
-                                        * If serial_id is not string.
-        * Warning:
-                                        * If not device is found corresponding
-                                            to device index.
-        """
-        
-        if not self.__apis_init_stat['py_rtlsdr_get_index_by_serial']:
-            f = self.clib.rtlsdr_get_index_by_serial
-            f.restype, f.argstypes = c_int, [POINTER(c_ubyte)]
-            self.__apis_init_stat['py_rtlsdr_get_index_by_serial'] = True
-
-        self.__check_for_rtlsdr_devices()        
-
-        if type(serial_id) != str:
-            print_error_msg("Expected serial_id to be string. Got: %s"%(type(serial_id)))
-            raise ValueError
-        
-        cserial_id = cstr(serial_id)
-        result = self.clib.rtlsdr_get_index_by_serial(cserial_id)
-        if(result < 0):
-            print_warn_msg("Failed to fetch any device with serial id: %s"%(serial_id))
-            return None
-        return result
+    @property
+    def rtl_xo_freq(self):
+        self.__rtl_xo_freq, _ = self.clib.py_rtlsdr_get_xtal_freq(self.__dev_ptr)
+        return self.__rtl_xo_freq
     
-    def py_rtlsdr_open(self, device_index):
-        """
-        Create and return the device handle 
-        for the RTL-SDR for given device index.
-
-        Parameters
-        ----------
-        * device_index                      : (int) RTL-SDR device index.
-
-        Raises
-        ------
-        * ValueError
-                                            * If invalid device index is passed.
-                                            * If fail to open the device handle.
+    @freq_correction.setter
+    def freq_correction(self, ppm):
+        self.clib.py_rtlsdr_set_freq_correction(self.__dev_ptr, ppm)
+        self.__freq_correction = ppm
         
-        Returns 
-        -------
-        * handle                     : (p_rtlsdr_dev) Device handle.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_open']:
-            f = self.clib.rtlsdr_open
-            f.restype, f.argtypes = c_int, [POINTER(p_rtlsdr_dev), c_uint]
-            self.__apis_init_stat['py_rtlsdr_open'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if int(device_index) != device_index:
-            print_error_msg("Expected device index to be int. Got: %d"%(type(device_index)))
-            raise ValueError
+        returned_freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
+        if self.__logging_level < 3:
+            print_success_msg("Freq correct is set to %d ppm"%(ppm))
     
-        device_index = int(device_index)
-
-        if device_index < 0:
-            print_error_msg("Device index must be non-negative.")
-            raise ValueError
-        
-        if device_index >= self.py_rtlsdr_get_device_count():
-            print_error_msg("Expected device index < %d. Got device index: %d."%(self.py_rtlsdr_get_device_count(), device_index))
-            raise ValueError
-        
-        dev_p = p_rtlsdr_dev(None)
-        c_device_index = c_uint(device_index)
-        result = self.clib.rtlsdr_open(dev_p, c_uint(device_index))
-        
-        if result == -1:
-            print_error_msg("Device or libusb is inaccessible.")
-            raise ValueError
-        
-        if result == -3:
-            print_error_msg("Device permissions don't fit. Check if dev rules file is installed.")
-        
-        if(result < 0):
-            print_error_msg("Failed to open device handle for device index: %d."%(device_index.value))
-            raise ValueError
-        return dev_p
+    @tuner_gain.setter
+    def tuner_gain(self, gain):
+        self.clib.py_rtlsdr_set_tuner_gain(self.__dev_ptr, gain)
+        self.__tuner_gain = gain
+        if self.__logging_level < 3:
+            print_success_msg("Tuner gain is set to %d dB.")
     
-    def py_rtlsdr_close(self, dev_handle_ptr):
-        """
-        Closes the existing device handle 
-        to a RTL-SDR device.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-
-        Raises
-        ------
-        * ValueError
-                                                * If fails to close the device handle.
+    @center_freq.setter
+    def center_freq(self, freq):
+        self.clib.py_rtlsdr_set_center_freq(self.__dev_ptr, freq)
+        self.__center_freq = freq
         
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_close']:
-            f = self.clib.rtlsdr_close
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_close'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        result = self.clib.rtlsdr_close(dev_handle_ptr)
-        if result != 0:
-            print_error_msg("Failed to close device handle for device index: %d."%(device_index))
-            raise ValueError
-
-    def py_rtlsdr_get_xtal_freq(self, device_handle_ptr):
-        """
-        Reads and returns the crystal frequency used to
-        clock the RTL2832 and the Rafael Micro R820T tuner.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-
-        Returns
-        -------
-        * rtl_freq                              : (int) Returns RTL2832 crystal frequency in Hz.
-        * tuner_freq                            : (int) Returns Tuner frequency in Hz.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to read the xtal freq of tuner or
-                                                    RTL2832 chip.
-        
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_get_xtal_freq']:
-            f = self.clib.rtlsdr_get_xtal_freq
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, POINTER(c_uint32), POINTER(c_uint32)]
-            self.__apis_init_stat['py_rtlsdr_get_xtal_freq'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        rtl_freq = c_uint32(0)
-        tuner_freq = c_uint32(0)
-
-        result  = self.clib.rtlsdr_get_xtal_freq(device_handle_ptr, 
-                                                  byref(rtl_freq),
-                                                  byref(tuner_freq))
-        
-        if result != 0:
-            print_error_msg("Failed to fetch xtal freq. of tuner and RTL2832 chip.")
-            raise ValueError
-        return rtl_freq.value, tuner_freq.value
-    
-    def py_rtlsdr_set_center_freq(self, device_handle_ptr, center_freq):
-        """
-        Sets the center frequency of the tuner to the
-        specified frequency.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * center_freq                           : (int) Center frequency to tune device to in Hz.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the specified center freq.
-                                                * If center freq is invalid.
-        * TypeError
-                                                * If type of center freq is not int.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_set_center_freq']:
-            f = self.clib.rtlsdr_set_center_freq
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_uint32]
-            self.__apis_init_stat['py_rtlsdr_set_center_freq'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if int(center_freq) != center_freq:
-            print_error_msg("Expected center freq to be int. Got: %s"%(type(center_freq)))
-            raise TypeError
-        
-        center_freq = int(center_freq)
-
-        if center_freq <= 0:
-            print_error_msg("Expected center freq > 0. Got: %d"%(center_freq))
-            raise ValueError
-
-        result = self.clib.rtlsdr_set_center_freq(device_handle_ptr, c_uint32(center_freq))
-        if result != 0:
-            print_error_msg("Failed to set center freq to :%d"%(center_freq))
-            raise ValueError
-
-
-    def py_rtlsdr_get_center_freq(self,device_handle_ptr):
-        """
-        Reads and returns the center frequency of the tuner
-        to which it is currently tuned to.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-
-        Returns
-        -------
-        * center_freq                           : (int) Returns center frequency to which
-                                                    device is tuned to in Hz.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to read the center freq.
-        
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_get_center_freq']:
-            f = self.clib.rtlsdr_get_center_freq
-            f.restype, f.argtypes = c_uint, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_get_center_freq'] = True
-
-        self.__check_for_rtlsdr_devices()
-        
-        center_freq = self.clib.rtlsdr_get_center_freq(device_handle_ptr)
-        if center_freq == 0:
-            print_error_msg("Failed to read the center freq of the tuner. Make sure to set the center freq before querying it.")
-            raise ValueError
-        return center_freq
-    
-    def py_rtlsdr_set_tuner_gain(self, device_handle_ptr, gain):
-        """
-        Set the specified gain value of the tuner.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * gain                                  : (float) gain to apply in db.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the
-                                                    gain value.
-        * TypeError
-                                                * If invalid/unsupported gain value
-                                                    is specified.
-        
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_set_tuner_gain']:
-            f = self.clib.rtlsdr_set_tuner_gain
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_int]
-            self.__apis_init_stat['py_rtlsdr_set_tuner_gain'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if float(gain) != gain:
-            print_error_msg("Expected gain to be of type float. Got: %s", type(gain))
-            raise TypeError
-        
-        supported_gain_values = self.py_rtlsdr_get_tuner_gains(device_handle_ptr)
-        if gain not in supported_gain_values:
-            print_error_msg("Invalid/Unsupported gain value %.1f dB is specified."%(gain))
-            raise TypeError
-        
-        c_gain_value = int(gain * 10.0)
-        result = self.clib.rtlsdr_set_tuner_gain(device_handle_ptr, c_int(c_gain_value))
-        if result != 0:
-            print_error_msg("Failed to set the specified gain value %.1f dB of the tuner."%(gain))
-            raise ValueError
+        returned_center_freq = self.clib.py_rtlsdr_get_center_freq(self.__dev_ptr)
+        if self.__logging_level < 3:
+            print_success_msg("Device center freq is set to %d Hz."%(returned_center_freq))
 
     
-    def py_rtlsdr_get_tuner_gains(self, device_handle_ptr):
-        """
-        Returns the list of supported gain values of the tuner.
-        The values are returned in dB.
+    @sample_rate.setter
+    def sample_rate(self, rate):
+        self.clib.py_rtlsdr_set_sample_rate(self.__dev_ptr, rate)
+        self.__sample_rate = rate
 
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to the read the supported
-                                                    gain values.
-        
-        Returns
-        -------
-        * gain_values                           : (list) List of supported gain values
-                                                    of the tuner in dB.
-        """
+        returned_sample_rate = self.clib.py_rtlsdr_get_sample_rate(self.__dev_ptr)
+        if self.__logging_level < 3:
+            print_success_msg("Device sample rate is set to %d Hz."%(returned_sample_rate))
 
-        if not self.__apis_init_stat['py_rtlsdr_get_tuner_gains']:
-            f = self.clib.rtlsdr_get_tuner_gains
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, POINTER(c_int)]
-            self.__apis_init_stat['py_rtlsdr_get_tuner_gains'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        c_gain_values_list = [-1] * 50
-        c_gain_values_list = (c_int * len(c_gain_values_list))(*c_gain_values_list)
-        
-        result = self.clib.rtlsdr_get_tuner_gains(device_handle_ptr, c_gain_values_list)
-        if result <= 0:
-            print_error_msg("Failed to read supported gain values for the tuner.")
-            raise ValueError
-        
-        gain_values = []
-        for idx in range(0, result):
-            gain_values.append(c_gain_values_list[idx]/10.0)
-        return gain_values
+    @enable_agc.setter
+    def enable_agc(self, enable):
+        self.clib.py_rtlsdr_set_agc_mode(self.__dev_ptr, enable=enable)
+        self.__enable_agc = enable
+        if self.__logging_level < 3:
+            if enable:
+                print_success_msg("Device internal AGC is enabled.")
+            else:
+                print_success_msg("Device internal AGC is disabled.")
     
-    def py_rtlsdr_get_tuner_gain(self, device_handle_ptr):
-        """
-        Reads and Returns the current gain value of the tuner
-        in dB.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to the read the
-                                                    gain value of the tuner.
-        
-        Returns
-        -------
-        * gain_value                            : (float) Current gain value of the
-                                                    tuner in dB.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_get_tuner_gain']:
-            f = self.clib.rtlsdr_get_tuner_gain
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_get_tuner_gain'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        gain_value = self.clib.rtlsdr_get_tuner_gain(device_handle_ptr)
-        if gain_value < 0:
-            print_warn_msg("Failed to read current tuner gain value.")
-            raise ValueError
-        elif gain_value == 0:
-            print_warn_msg("Returned gain value is 0 dB. The return value could be the error code or the gain value.")
-        return gain_value/10.0
-
-    def py_rtlsdr_set_freq_correction(self, device_handle_ptr, ppm):
-        """
-        Sets the frequency correction value. The value
-        must in parts per million (ppm).
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * ppm                                   : (int) Frequency correction in ppm.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the frequency correction.
-        * TypeError   
-                                                * If frequency correction value is invalid.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_set_freq_correction']:
-            f = self.clib.rtlsdr_set_freq_correction
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_int]
-            self.__apis_init_stat['py_rtlsdr_set_freq_correction'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if int(ppm) != ppm:
-            print_error_msg("Expected ppm to be of type int. Got: %s"%(type(ppm)))
-            raise ValueError
-        
-        ppm = int(ppm)
-
-        result = self.clib.rtlsdr_set_freq_correction(device_handle_ptr, c_int(ppm))
-        if result != 0:
-            print_error_msg("Failed to do the freq correction by %d"%(ppm))
-            raise ValueError
+    @tuner_gain.setter
+    def tuner_gain(self, gain):
+        self.clib.py_rtlsdr_set_tuner_gain(self.__dev_ptr, gain)
+        self.__tuner_gain = gain
+        if self.__logging_level < 3:
+            print_success_msg("Tuner gain is set to %d dB"%(gain))
     
-    def py_rtlsdr_get_freq_correction(self, device_handle_ptr):
-        """
-        Reads and returns the frequency correction value. The value
-        is returned in ppm.
+    @enable_auto_tuner_gain.setter
+    def enable_auto_tuner_gain(self, enable):
+        self.clib.py_rtlsdr_set_tuner_gain_mode(self.__dev_ptr, manual=not enable)
+        self.__enable_auto_tuner_gain = enable
+        if self.__logging_level < 3:
+            if enable:
+                print_success_msg("Tuner gain selection is set to auto.")
+            else:
+                print_success_msg("Tuner gain selection is set to manual.")
 
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-       
-        Returns
-        -------
-         * ppm                                  : (int) Frequency correction in ppm.
+    def __init_default(self):
+        """
+        Intializes the default values of the SDR.
+        """
+        if self.__logging_level < 3:
+            print_info_msg("Intializing device with default values.")
         
+        center_freq = 980e6     # 980 Mhz
+        sample_rate = 2e6       # 2 MSPS
+        agc = True              # Enable AGC 
+        auto_lna_gain = True    # Enable automatic lna gain selection
+        auto_tuner_gain_mode = True # Set tuner gain mode to auto.
+
+        self.center_freq = center_freq
+        self.sample_rate = sample_rate
+        self.enable_agc = agc
+        self.enable_auto_tuner_gain = auto_tuner_gain_mode
+
+
+    def __repr__(self,):
+        object_str = str({'Device Index': self.__device_index, 
+                           'Logging Level': self.__logging_level,
+                           'Manufacturer': self.__mid,
+                           'Vendor ID': self.__vid, 
+                           'Serial': self.__serial,
+                           'Supported tuner gain values in dB': self.__tuner_gains,
+                           'Freq correction (ppm)': self.__freq_correction,
+                           'Center freq (Hz)': self.__center_freq,
+                           'Sample rate (MSPS)': self.__sample_rate,
+                           'AGC': 'enabled' if self.__enable_agc else 'disabled',
+                           'Tuner Mode': 'auto' if self.__enable_auto_tuner_gain else 'manual',
+                           'Tuner gain (dB)': self.__tuner_gain,
+                           'Tuner xtal freq (Hz)': self.__tuner_xo_freq,
+                           'RTL2832 xtal freq (Hz)': self.__rtl_xo_freq
+                           })
+        return object_str
+
+    def __del__(self):
+        """
+        Device clearn up function. This function
+        is called when the object goes out of scope.
+        Closes the connection to the device.
         """
 
-        if not self.__apis_init_stat['py_rtlsdr_get_freq_correction']:
-            f = self.clib.rtlsdr_get_freq_correction
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_get_freq_correction'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        freq_correction_value = self.clib.rtlsdr_get_freq_correction(device_handle_ptr)
-        return freq_correction_value
-    
-    def py_rtlsdr_set_agc_mode(self, device_handle_ptr, enable=True):
-        """
-        Enable or disable the intenal AGC of the 
-        RTL2832 chip.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * enable                                : (bool) Enable automatic gain contorl (agc). 
-                                                    Default: True (enabled)
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the agc mode.
-        * TypeError   
-                                                * If enable is not of bool type.
-        """
-        if not self.__apis_init_stat['py_rtlsdr_set_agc_mode']:
-            f = self.clib.rtlsdr_set_agc_mode
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_int]
-            self.__apis_init_stat['py_rtlsdr_set_agc_mode'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if bool(enable) != enable:
-            print_error_msg("Expected enable to be of bool type. Got: %s", type(enable))
-            raise TypeError
-
-        enable = bool(enable)
-
-        if enable:
-            enable_mode = 1
+        if self.__dev_ptr.value is not None:
+            self.clib.py_rtlsdr_close(self.__dev_ptr)
+            if self.__logging_level == 1:
+                print_success_msg("Successfully closed the libusb connection to the device.")
         else:
-            enable_mode = 0
-        
-        result = self.clib.rtlsdr_set_agc_mode(device_handle_ptr, c_int(enable_mode))
-        if result != 0:
-            print_error_msg("Failed to set internal agc mode to %d."%(enable_manual_mode))
-            raise ValueError
-
-        if enable:
-            print_info_msg("RTL2832 internal AGC is enabled.")
-        else:
-            print_info_msg("RTL2832 internal AGC is disabled.")
-    
-    def py_rtlsdr_set_sample_rate(self, device_handle_ptr, sample_rate):
-        """
-        Sets the sample rate of the device. 
-        Valid sample rate range for R820 Tuner.
-            226 ksps - 3.2 msps.
-        Recomended to keep sample rate <= 2.8 msps.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * sample_rate                           : (int) Sample rate in Hz.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the sample rate of the
-                                                    device.
-        * TypeError   
-                                                * If sample rate type/value is invalid.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_set_sample_rate']:
-            f = self.clib.rtlsdr_set_sample_rate
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_uint32]
-            self.__apis_init_stat['py_rtlsdr_set_sample_rate'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if int(sample_rate) != sample_rate:
-            print_error_msg("Expected sample_rate to be of type int. Got: %s"%(type(sample_rate)))
-            raise ValueError
-        
-        sample_rate = int(sample_rate)
-
-        result = self.clib.rtlsdr_set_sample_rate(device_handle_ptr, c_uint32(sample_rate))
-        if result != 0:
-            print_error_msg("Failed to do the device sample rate to %d Hz."%(sample_rate))
-            raise ValueError
-    
-    def py_rtlsdr_get_sample_rate(self, device_handle_ptr):
-        """
-        Get the current sample rate of the device in Hz.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to read the sample rate of
-                                                    the device.
-        
-        Returns
-        -------
-        * sample_rate                           : (int) Returns the sample rate in Hz.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_get_sample_rate']:
-            f = self.clib.rtlsdr_get_sample_rate
-            f.restype, f.argtypes = c_uint32, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_get_sample_rate'] = True
-
-        self.__check_for_rtlsdr_devices()
-        
-        sample_rate = self.clib.rtlsdr_get_sample_rate(device_handle_ptr)
-        if sample_rate == 0:
-            print_error_msg("Failed to read the device sample rate.")
-            raise ValueError
-        return sample_rate
-
-
-    def py_rtlsdr_set_tuner_gain_mode(self, device_handle_ptr, manual=False):
-        """
-        Sets the tuner gain mode to automatic or
-        manual.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-        * manual                                : (bool) Enable manual tuner gain mode. 
-                                                    Default: False (auto)
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to set the specified gain mode.
-        * TypeError   
-                                                * If manual is not of bool type.
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_set_tuner_gain_mode']:
-            f = self.clib.rtlsdr_set_tuner_gain_mode
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev, c_int]
-            self.__apis_init_stat['py_rtlsdr_set_tuner_gain_mode'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        if bool(manual) != manual:
-            print_error_msg("Expected manual to be of bool type. Got: %s", type(manual))
-            raise TypeError
-
-        manual = bool(manual)
-
-        if manual:
-            enable_manual_mode = 1
-        else:
-            enable_manual_mode = 0
-        
-        result = self.clib.rtlsdr_set_tuner_gain_mode(device_handle_ptr, c_int(enable_manual_mode))
-        if result != 0:
-            print_error_msg("Failed to set tuner mode to %d."%(enable_manual_mode))
-            raise ValueError
-
-        if manual:
-            print_info_msg("LNA/Tuner gain mode is set to manual.")
-        else:
-            print_info_msg("LNA/Tuner gain mode is set to automatic")
-    
-    def py_rtlsdr_reset_buffer(self, device_handle_ptr):
-        """
-        Resets the RTL2832 sample buffer.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-
-        Raises
-        ------
-        * ValueError
-                                                * If fails to reset the buffer.
-        """
-        if not self.__apis_init_stat['py_rtlsdr_reset_buffer']:
-            f = self.clib.rtlsdr_reset_buffer
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_reset_buffer'] = True
-
-        self.__check_for_rtlsdr_devices()
-
-        result = self.clib.rtlsdr_reset_buffer(device_handle_ptr)
-        if result != 0:
-            print_error_msg("Failed to reset the RTL2832 sample buffer.")
-            raise ValueError
-    
-    '''
-    def py_rtlsdr_is_tuner_PLL_locked(self, device_handle_ptr):
-        """
-        Reads and returns whether the tuner PLL 
-        is locked to the center frequency. Tuner/PLL might 
-        loose the lock at high frequencies due to temperature
-        reasons.
-
-        Parameters
-        ----------
-        * dev_handle_ptr                        : (p_rtlsdr_dev) Device handle pointer.
-
-        Returns
-        -------
-        * pll_locked                            : (bool) Returns whether PLL is locked or
-                                                    not.
-       
-        Raises
-        ------
-        * ValueError
-                                                * If fails to read whether PLL islocked
-                                                    or not.
-        
-        """
-
-        if not self.__apis_init_stat['py_rtlsdr_is_tuner_PLL_locked']:
-            f = self.clib.rtlsdr_is_tuner_PLL_locked
-            f.restype, f.argtypes = c_int, [p_rtlsdr_dev]
-            self.__apis_init_stat['py_rtlsdr_is_tuner_PLL_locked'] = True
-
-        self.__check_for_rtlsdr_devices()
-        
-        pll_locked = self.clib.rtlsdr_is_tuner_PLL_locked(device_handle_ptr)
-        print(pll_locked)
-        
-        if pll_locked == 0:
-            return True
-        elif pll_locked == 1:
-            return False
-        elif pll_locked == -2:
-            print_error_msg("Checking PLL is locked on this tuner is not supported.")
-            raise ValueError
-        else:
-            print_error_msg("Failed to check whether PLL is locked.")
-            raise ValueError
-
-    '''
+            if self.__logging_level < 4:
+                print_warn_msg("Device handle pointer is None. Skipping close libusb connection to the device.")
