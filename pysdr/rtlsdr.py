@@ -26,7 +26,7 @@ class Radio:
 
     Attributes
     ----------
-    * clib                                  * (librtlsdr) Returns the device librtlsdr object.
+    * clib                                  * (librtlsdr) Device librtlsdr object.
     * center_freq                           * (int) Center freq of the device in Hz.
     * sample_rate                           * (int) Sample Rate of the device in Hz.
     * freq_correction                       * (int) Frequency correction in ppm.
