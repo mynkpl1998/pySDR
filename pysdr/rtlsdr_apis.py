@@ -743,7 +743,7 @@ class librtlsdr:
             raise TypeError
 
         manual = bool(manual)
-
+        
         if manual:
             enable_manual_mode = 1
         else:
@@ -838,7 +838,6 @@ class librtlsdr:
         start_time = datetime.datetime.now()
         result = self.clib.rtlsdr_read_sync(device_handle_ptr, sample_bfr,  c_int(num_bytes), num_bytes_read)
         end_time = datetime.datetime.now()
-
         if(result != 0):
             print_error_msg("Failed to read samples from device due to some libusb error.")
             raise ValueError

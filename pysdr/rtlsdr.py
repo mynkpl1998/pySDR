@@ -1,3 +1,4 @@
+import numpy as np
 from ctypes import c_void_p
 from pysdr.rtlsdr_apis import librtlsdr
 from pysdr.utils import print_error_msg, print_info_msg, print_success_msg, print_warn_msg
@@ -35,6 +36,7 @@ class Radio:
     * enable_auto_tuner_gain                * (bool) Gain selection mode of the tuner. Auto - True, manual - False.
     * tuner_xo_freq                         * (int) Tuner crystal frequency in Hz.
     * rtl_xo_freq                           * (int) RTL2832 crystal frequency in Hz.
+    * num_recv_samples                      * (np.array) Number of samples to read from the SDR. 
 
     """
 
@@ -84,18 +86,23 @@ class Radio:
         self.__tuner_gains = self.clib.py_rtlsdr_get_tuner_gains(self.__dev_ptr)
         self.__freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
         self.__rtl_xo_freq, self.__tuner_xo_freq = self.clib.py_rtlsdr_get_xtal_freq(self.__dev_ptr)
+        self.__num_recv_samples = None
 
         # Init defaults
         self.__init_default()
 
+        # Reset libusb buffer
+        self.clib.py_rtlsdr_reset_buffer(self.__dev_ptr)
+
         if self.__logging_level < 3:
             device_config = 'Intialized device with following default values.'
-            device_config += '\n\t1. Center Freq: %d Hz.'%(self.__center_freq)
-            device_config += '\n\t2. Sample Rate: %d MSPS.'%(self.__sample_rate)
-            device_config += '\n\t3. AGC Enabled: %s.'%(self.__enable_agc)
-            device_config += '\n\t4. Automatic tuner gain selection: %s.'%(self.__enable_auto_tuner_gain)
-            device_config += '\n\t5. Freq Correction: %d ppm'%(self.__freq_correction)
-            device_config += '\n\t6. Tuner gain: %s dB'%(self.__tuner_gain)
+            device_config += '\n\t1. Center Freq: %d Hz.'%(self.center_freq)
+            device_config += '\n\t2. Sample Rate: %d MSPS.'%(self.sample_rate)
+            device_config += '\n\t3. AGC Enabled: %s.'%(self.enable_agc)
+            device_config += '\n\t4. Automatic tuner gain selection: %s.'%(self.enable_auto_tuner_gain)
+            device_config += '\n\t5. Freq Correction: %d ppm'%(self.freq_correction)
+            device_config += '\n\t6. Tuner gain: %s dB'%(self.tuner_gain)
+            device_config += '\n\t7. Frame size (samples/frame): %d'%(self.num_recv_samples)
             print_info_msg(device_config)
     
     @property
@@ -103,6 +110,10 @@ class Radio:
         self.__tuner_gain = self.clib.py_rtlsdr_get_tuner_gain(self.__dev_ptr)
         return self.__tuner_gain
     
+    @property
+    def num_recv_samples(self):
+        return self.__num_recv_samples
+
     @property
     def freq_correction(self):
         self.__freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
@@ -153,13 +164,6 @@ class Radio:
         if self.__logging_level < 3:
             print_success_msg("Freq correct is set to %d ppm"%(ppm))
     
-    @tuner_gain.setter
-    def tuner_gain(self, gain):
-        self.clib.py_rtlsdr_set_tuner_gain(self.__dev_ptr, gain)
-        self.__tuner_gain = gain
-        if self.__logging_level < 3:
-            print_success_msg("Tuner gain is set to %d dB.")
-    
     @center_freq.setter
     def center_freq(self, freq):
         self.clib.py_rtlsdr_set_center_freq(self.__dev_ptr, freq)
@@ -191,13 +195,30 @@ class Radio:
     
     @tuner_gain.setter
     def tuner_gain(self, gain):
+        """
+        Make sure tuner gain selection mode is set to manual
+        before over writing the value.
+        """
+        self.__enable_auto_tuner_gain = False
         self.clib.py_rtlsdr_set_tuner_gain(self.__dev_ptr, gain)
         self.__tuner_gain = gain
         if self.__logging_level < 3:
             print_success_msg("Tuner gain is set to %d dB"%(gain))
+        
+    @num_recv_samples.setter
+    def num_recv_samples(self, num_samples):
+        if type(num_samples) != int:
+            print_error_msg("Expected int. Got: %s"%(type(num_samples)))
+            raise ValueError
+        
+        self.__num_recv_samples = num_samples
     
     @enable_auto_tuner_gain.setter
     def enable_auto_tuner_gain(self, enable):
+        if type(enable) != bool:
+            print_error_msg("Expected bool. Got: %s"%(type(enable)))
+            raise ValueError
+    
         self.clib.py_rtlsdr_set_tuner_gain_mode(self.__dev_ptr, manual=not enable)
         self.__enable_auto_tuner_gain = enable
         if self.__logging_level < 3:
@@ -218,11 +239,13 @@ class Radio:
         agc = True              # Enable AGC 
         auto_lna_gain = True    # Enable automatic lna gain selection
         auto_tuner_gain_mode = True # Set tuner gain mode to auto.
+        num_samples = 512       # Number of samples to read from SDR
 
         self.center_freq = center_freq
         self.sample_rate = sample_rate
         self.enable_agc = agc
         self.enable_auto_tuner_gain = auto_tuner_gain_mode
+        self.num_recv_samples = num_samples
 
 
     def __repr__(self,):
@@ -231,17 +254,56 @@ class Radio:
                            'Manufacturer': self.__mid,
                            'Vendor ID': self.__vid, 
                            'Serial': self.__serial,
-                           'Supported tuner gain values in dB': self.__tuner_gains,
-                           'Freq correction (ppm)': self.__freq_correction,
-                           'Center freq (Hz)': self.__center_freq,
-                           'Sample rate (MSPS)': self.__sample_rate,
-                           'AGC': 'enabled' if self.__enable_agc else 'disabled',
-                           'Tuner Mode': 'auto' if self.__enable_auto_tuner_gain else 'manual',
-                           'Tuner gain (dB)': self.__tuner_gain,
-                           'Tuner xtal freq (Hz)': self.__tuner_xo_freq,
-                           'RTL2832 xtal freq (Hz)': self.__rtl_xo_freq
+                           'Supported tuner gain values in dB': self.tuner_gains,
+                           'Freq correction (ppm)': self.freq_correction,
+                           'Center freq (Hz)': self.center_freq,
+                           'Sample rate (MSPS)': self.sample_rate,
+                           'AGC': 'enabled' if self.enable_agc else 'disabled',
+                           'Tuner gain selection': 'auto' if self.enable_auto_tuner_gain else 'manual',
+                           'Tuner gain (dB)': self.tuner_gain,
+                           'Tuner xtal freq (Hz)': self.tuner_xo_freq,
+                           'RTL2832 xtal freq (Hz)': self.rtl_xo_freq,
+                           'Frame Size (samples/frame)': self.num_recv_samples
                            })
         return object_str
+    
+    def rx_samples(self):
+        """
+        Reads and returns the specifed number 
+        of IQ samples from the device.
+
+        Returns
+        -------
+        * samples                       :  (np.array) A numpy array of samples of 
+                                            complex type is returned. (Normalized)
+        """
+        frame_latency, raw_data = self.clib.py_rtlsdr_read_sync(self.__dev_ptr, self.num_recv_samples)
+        iq = raw_data.astype(np.float64).view(np.complex128)
+        iq /= 127.5
+        iq -= (1 + 1j)
+        
+        empirical_sample_rate = (self.num_recv_samples/frame_latency) * 1000
+        if empirical_sample_rate < self.sample_rate:
+            if self.__logging_level < 4:
+                print_warn_msg("Empirical sample rate: %.4f MSPS. Requested sample rate: %d MSPS."%(empirical_sample_rate, self.sample_rate))
+
+        if self.__logging_level < 3:
+            print_info_msg("Empirical sample rate: %.4f MSPS. Requested sample rate: %d MSPS."%(empirical_sample_rate, self.sample_rate))
+            
+        return iq
+    
+    def close(self, ):
+        """
+        Closes the libusb connection to the SDR device.
+        """
+        if self.__dev_ptr.value is not None:
+            self.clib.py_rtlsdr_close(self.__dev_ptr)
+            if self.__logging_level < 4:
+                print_success_msg("Successfully closed the libusb connection to the device.")
+        else:
+            if self.__logging_level < 4:
+                print_warn_msg("Device handle pointer is None. Skipping close libusb connection to the device.")
+        self.__dev_ptr = c_void_p(None)
 
     def __del__(self):
         """
@@ -252,8 +314,9 @@ class Radio:
 
         if self.__dev_ptr.value is not None:
             self.clib.py_rtlsdr_close(self.__dev_ptr)
-            if self.__logging_level == 1:
+            if self.__logging_level < 4 :
                 print_success_msg("Successfully closed the libusb connection to the device.")
         else:
             if self.__logging_level < 4:
                 print_warn_msg("Device handle pointer is None. Skipping close libusb connection to the device.")
+        self.__dev_ptr = c_void_p(None)
