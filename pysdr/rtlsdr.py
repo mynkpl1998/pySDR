@@ -113,6 +113,10 @@ class Radio:
     @property
     def num_recv_samples(self):
         return self.__num_recv_samples
+    
+    @property
+    def dev_ptr(self):
+        return self.__dev_ptr
 
     @property
     def freq_correction(self):
@@ -161,7 +165,7 @@ class Radio:
         self.__freq_correction = ppm
         
         returned_freq_correction = self.clib.py_rtlsdr_get_freq_correction(self.__dev_ptr)
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             print_success_msg("Freq correct is set to %d ppm"%(ppm))
     
     @center_freq.setter
@@ -170,7 +174,7 @@ class Radio:
         self.__center_freq = freq
         
         returned_center_freq = self.clib.py_rtlsdr_get_center_freq(self.__dev_ptr)
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             print_success_msg("Device center freq is set to %d Hz."%(returned_center_freq))
 
     
@@ -180,14 +184,14 @@ class Radio:
         self.__sample_rate = rate
 
         returned_sample_rate = self.clib.py_rtlsdr_get_sample_rate(self.__dev_ptr)
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             print_success_msg("Device sample rate is set to %d Hz."%(returned_sample_rate))
 
     @enable_agc.setter
     def enable_agc(self, enable):
         self.clib.py_rtlsdr_set_agc_mode(self.__dev_ptr, enable=enable)
         self.__enable_agc = enable
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             if enable:
                 print_success_msg("Device internal AGC is enabled.")
             else:
@@ -202,7 +206,7 @@ class Radio:
         self.__enable_auto_tuner_gain = False
         self.clib.py_rtlsdr_set_tuner_gain(self.__dev_ptr, gain)
         self.__tuner_gain = gain
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             print_success_msg("Tuner gain is set to %d dB"%(gain))
         
     @num_recv_samples.setter
@@ -221,7 +225,7 @@ class Radio:
     
         self.clib.py_rtlsdr_set_tuner_gain_mode(self.__dev_ptr, manual=not enable)
         self.__enable_auto_tuner_gain = enable
-        if self.__logging_level < 3:
+        if self.__logging_level == 1:
             if enable:
                 print_success_msg("Tuner gain selection is set to auto.")
             else:
@@ -246,6 +250,21 @@ class Radio:
         self.enable_agc = agc
         self.enable_auto_tuner_gain = auto_tuner_gain_mode
         self.num_recv_samples = num_samples
+    
+    def print_device_configuration(self,):
+        """
+        Prints the correct device configuration to
+        the console.
+        """
+        device_config = 'Current device settings.'
+        device_config += '\n\t1. Center Freq: %d Hz.'%(self.center_freq)
+        device_config += '\n\t2. Sample Rate: %d MSPS.'%(self.sample_rate)
+        device_config += '\n\t3. AGC Enabled: %s.'%(self.enable_agc)
+        device_config += '\n\t4. Automatic tuner gain selection: %s.'%(self.enable_auto_tuner_gain)
+        device_config += '\n\t5. Freq Correction: %d ppm'%(self.freq_correction)
+        device_config += '\n\t6. Tuner gain: %s dB'%(self.tuner_gain)
+        device_config += '\n\t7. Frame size (samples/frame): %d'%(self.num_recv_samples)
+        print_info_msg(device_config)
 
 
     def __repr__(self,):
@@ -298,7 +317,7 @@ class Radio:
         """
         if self.__dev_ptr.value is not None:
             self.clib.py_rtlsdr_close(self.__dev_ptr)
-            if self.__logging_level < 4:
+            if self.__logging_level == 1:
                 print_success_msg("Successfully closed the libusb connection to the device.")
         else:
             if self.__logging_level < 4:
@@ -314,7 +333,7 @@ class Radio:
 
         if self.__dev_ptr.value is not None:
             self.clib.py_rtlsdr_close(self.__dev_ptr)
-            if self.__logging_level < 4 :
+            if self.__logging_level == 1:
                 print_success_msg("Successfully closed the libusb connection to the device.")
         else:
             if self.__logging_level < 4:
