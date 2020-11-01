@@ -156,4 +156,4 @@ if __name__ == "__main__":
                     'psd-axis': {'axis': psd_axis}}
     
     ani = animation.FuncAnimation(fig, plot_samples, fargs=(sdr, axis_dict,), interval=10)
-    plt.show
+    plt.show()
