@@ -35,8 +35,10 @@ class librtlsdr:
         if find_library(crtlsdr_shared_lib) is None:
             print_error_msg("Unable to find librtlsdr.so. Make sure to install it from https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr.")
             raise ValueError
+        
+        crtlsdr_shared_lib = find_library(crtlsdr_shared_lib)
 
-        self.__clib = CDLL("lib" + crtlsdr_shared_lib)
+        self.__clib = CDLL(crtlsdr_shared_lib)
 
         # API's init status
         self.__apis_init_stat = {}
